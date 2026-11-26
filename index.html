@@ -221,7 +221,7 @@ header p { margin: 4px 0 0; color: var(--muted); max-width: 60ch; }
           <button class="btn" id="saveBtn" type="button">只存這張</button>
         </div>
         <p class="status" id="saveStatus"></p>
-        <p class="hint">「全部存到照片」會一張一張跳出儲存視窗，在 iPhone 上每次點「儲存影像」即可。用電腦的話，打包成 ZIP 比較快。</p>
+        <p class="hint">「全部存到照片」在 iPhone 上會跳出分享選單，選「儲存影像」即可。用電腦的話，打包成 ZIP 比較快；ZIP 在 iPhone 上只能存到「檔案」，不能直接進照片。</p>
       </div>
       <p class="hint">從 LINE、IG、FB 下載或截圖的照片通常已經沒有參數，請用相簿裡的原始照片。</p>
     </div>
@@ -229,7 +229,8 @@ header p { margin: 4px 0 0; color: var(--muted); max-width: 60ch; }
 
   <section class="card" id="galleryCard" hidden>
     <p class="label">原尺寸圖片</p>
-    <p class="hint strong">這個環境不能直接存檔。iPhone 請長按每張圖片 →「加入照片」；電腦請按右鍵 →「另存圖片」。</p>
+    <button class="btn primary" id="shareBtn" type="button" hidden>一次存到照片</button>
+    <p class="hint strong" id="galleryHint">這個環境不能直接存檔。iPhone 請長按每張圖片 →「加入照片」；電腦請按右鍵 →「另存圖片」。</p>
     <div class="gallery" id="gallery"></div>
   </section>
 </div>
@@ -745,14 +746,26 @@ header p { margin: 4px 0 0; color: var(--muted); max-width: 60ch; }
     gal.querySelectorAll("img").forEach((im) => URL.revokeObjectURL(im.src));
     gal.textContent = "";
     $("galleryCard").hidden = false;
+    $("shareBtn").hidden = true;
+    const files = [], used = new Set();
     for (let i = 0; i < list.length; i++) {
       setSaveStatus(`產生原尺寸圖片… ${i + 1} / ${list.length}`);
       const blob = await renderFull(list[i]);
+      files.push(new File([blob], fileName(list[i], used), { type: "image/jpeg" }));
       const im = document.createElement("img");
       im.alt = list[i].name; im.src = URL.createObjectURL(blob);
       gal.appendChild(im);
       await sleep(0);
     }
+    // Web Share needs a fresh tap, and rendering takes longer than the tap stays valid, so share from a second button.
+    S.shareFiles = files;
+    let canShare = false;
+    try { canShare = !!(navigator.canShare && navigator.canShare({ files })); } catch (e) { canShare = false; }
+    $("shareBtn").hidden = !canShare;
+    $("shareBtn").textContent = files.length > 1 ? `一次存到照片（${files.length} 張）` : "存到照片";
+    $("galleryHint").textContent = canShare
+      ? `圖片已準備好。按上方按鈕，在分享選單選「儲存${files.length > 1 ? " " + files.length + " 張" : ""}影像」就會全部存進照片。也可以長按單張圖片存檔。`
+      : "這個環境不能直接存檔。iPhone 請長按每張圖片 →「加入照片」；電腦請按右鍵 →「另存圖片」，或改用「打包成 ZIP」。";
     setSaveStatus("");
     $("galleryCard").scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -820,6 +833,17 @@ header p { margin: 4px 0 0; color: var(--muted); max-width: 60ch; }
   $("saveAllBtn").addEventListener("click", () => saveList(S.items.length ? S.items.slice() : [SAMPLE]));
   $("saveBtn").addEventListener("click", () => saveList([curItem()]));
   $("zipBtn").addEventListener("click", saveZip);
+  $("shareBtn").addEventListener("click", () => {
+    const files = S.shareFiles || [];
+    if (!files.length) return;
+    navigator.share({ files }).then(
+      () => setSaveStatus(`已把 ${files.length} 張送到分享選單。`, "ok"),
+      (e) => {
+        if (e && e.name === "AbortError") return; // viewer closed the sheet
+        setSaveStatus("分享選單打不開，可能一次太多張。請分批處理（例如一次 10 張），或長按單張存檔。", "warn");
+      }
+    );
+  });
 
   // ---------- wiring ----------
   $("file").addEventListener("change", (e) => { loadFiles(e.target.files); e.target.value = ""; });
