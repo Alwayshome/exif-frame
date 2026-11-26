@@ -879,6 +879,26 @@ header p { margin: 4px 0 0; color: var(--muted); max-width: 60ch; }
   stage.addEventListener("dragleave", () => stage.classList.remove("drag"));
   stage.addEventListener("drop", (e) => { e.preventDefault(); stage.classList.remove("drag"); loadFiles(e.dataTransfer.files); });
 
+  // ---------- remember the viewer's last options (this browser only) ----------
+  const PREF_KEY = "exif-frame:prefs:v1";
+  const TOGGLES = ["t-date", "t-lens", "t-exif", "t-gps"];
+  function savePrefs() {
+    const p = { style: S.style };
+    for (const id of TOGGLES) p[id] = $(id).checked;
+    try { localStorage.setItem(PREF_KEY, JSON.stringify(p)); } catch (e) {}
+  }
+  function loadPrefs() {
+    let p = null;
+    try { p = JSON.parse(localStorage.getItem(PREF_KEY) || "null"); } catch (e) { p = null; }
+    if (!p || typeof p !== "object") return;
+    if (["white", "black", "blur"].includes(p.style)) { S.style = p.style; $("style-" + p.style).checked = true; }
+    for (const id of TOGGLES) if (typeof p[id] === "boolean") $(id).checked = p[id];
+    $("t-gps").disabled = !$("t-exif").checked;
+  }
+  document.querySelectorAll('input[name="style"]').forEach((r) => r.addEventListener("change", savePrefs));
+  for (const id of TOGGLES) $(id).addEventListener("change", savePrefs);
+  loadPrefs();
+
   // ---------- start with the sample ----------
   for (const k of FIELDS) $("f-" + k).value = SAMPLE.v[k];
   refreshButtons();
