@@ -1,0 +1,870 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+</head>
+<body>
+<title>EXIF 參數邊框</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: photo-lab bench — preview + contact strip on the left as the "prints", controls on the right as the "enlarger panel"; stacks on phones. */
+:root {
+  --bg: #eef0ee;
+  --surface: #ffffff;
+  --fg: #181b1a;
+  --muted: #646b67;
+  --line: #d6dad7;
+  --accent: #e3a400;
+  --accent-ink: #1b1600;
+  --warn: #b4530f;
+  --ok: #2f7a4b;
+  --font-display: "Archivo", "Inter", "PingFang TC", "Noto Sans TC", system-ui, sans-serif;
+  --font-body: "Inter", "PingFang TC", "Noto Sans TC", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111312; --surface: #1a1d1c; --fg: #e7ebe8; --muted: #98a09b; --line: #2b302d;
+    --accent: #f2b80a; --accent-ink: #1b1600; --warn: #f0934f; --ok: #6cc28f;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111312; --surface: #1a1d1c; --fg: #e7ebe8; --muted: #98a09b; --line: #2b302d;
+  --accent: #f2b80a; --accent-ink: #1b1600; --warn: #f0934f; --ok: #6cc28f;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg);
+  font-family: var(--font-body); font-size: 15px; line-height: 1.5;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 40px;
+}
+.wrap { max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+header h1 {
+  font-family: var(--font-display); font-weight: 800; font-size: clamp(1.6rem, 4vw, 2.2rem);
+  letter-spacing: -0.01em; margin: 0; text-wrap: balance;
+}
+header p { margin: 4px 0 0; color: var(--muted); max-width: 60ch; }
+
+.grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 820px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+
+.stage {
+  position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  padding: 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0;
+}
+.stage.drag { outline: 2px dashed var(--accent); outline-offset: -6px; }
+.stage > img { display: block; width: 100%; height: auto; border-radius: 2px; box-shadow: 0 1px 3px rgba(0,0,0,.18); background: var(--line); min-height: 120px; }
+.badge {
+  position: absolute; top: 24px; left: 24px; font-size: 12px; font-weight: 600; letter-spacing: .04em;
+  background: var(--accent); color: var(--accent-ink); padding: 2px 8px; border-radius: 4px;
+}
+.stagebar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.counter { font-family: var(--font-mono); font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.nav { display: flex; gap: 6px; }
+.nav button {
+  appearance: none; border: 1px solid var(--line); background: var(--surface); color: var(--fg);
+  border-radius: 6px; padding: 6px 12px; font: 500 14px/1 var(--font-body); cursor: pointer;
+}
+.nav button:disabled { opacity: .4; cursor: default; }
+.hint { font-size: 13px; color: var(--muted); margin: 0; }
+.hint.strong { color: var(--fg); background: color-mix(in srgb, var(--accent) 18%, transparent); padding: 8px 10px; border-radius: 6px; }
+
+.strip { display: flex; gap: 8px; overflow-x: auto; padding: 4px 2px 6px; scrollbar-width: thin; }
+.thumb {
+  flex: 0 0 auto; position: relative; width: 72px; height: 72px; padding: 0; border: 2px solid transparent;
+  border-radius: 6px; overflow: hidden; background: var(--line); cursor: pointer;
+}
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.thumb[aria-current="true"] { border-color: var(--accent); }
+.thumb .dot {
+  position: absolute; right: 4px; bottom: 4px; width: 10px; height: 10px; border-radius: 50%;
+  border: 2px solid #fff; background: var(--ok);
+}
+.thumb .dot.warn { background: var(--warn); }
+.thumb .dot.busy { background: #999; }
+
+.panel { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.label { font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0; }
+.row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+
+.btn {
+  appearance: none; border: 1px solid var(--line); background: var(--surface); color: var(--fg);
+  font: 600 16px/1.2 var(--font-body); padding: 14px 16px; border-radius: 8px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; text-align: center;
+}
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.btn.small { font-size: 14px; padding: 9px 12px; width: auto; }
+.btn:focus-visible, input:focus-visible, .seg label:focus-within, .thumb:focus-visible, .nav button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn:disabled { opacity: .6; cursor: progress; }
+#file { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.btns .full { grid-column: 1 / -1; }
+
+.status { font-size: 13px; margin: 0; color: var(--muted); }
+.status.ok { color: var(--ok); }
+.status.warn { color: var(--warn); }
+
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg label {
+  border: 1px solid var(--line); border-radius: 8px; padding: 10px 6px; text-align: center; cursor: pointer;
+  font-weight: 500; display: flex; flex-direction: column; align-items: center; gap: 6px;
+}
+.seg label:has(input:checked) { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.swatch { width: 44px; height: 30px; border-radius: 3px; border: 1px solid var(--line); position: relative; overflow: hidden; }
+.swatch::before { content: ""; position: absolute; inset: 3px 3px 9px; background: linear-gradient(160deg, #3b4f7a, #e58d5b); border-radius: 1px; }
+.sw-white { background: #fff; }
+.sw-black { background: #111; }
+.sw-blur { background: linear-gradient(160deg, #2b3550, #8a5a46); }
+.sw-blur::before { inset: 4px 7px 10px; }
+
+.fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.fields .full { grid-column: 1 / -1; }
+.field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.field span { font-size: 12px; color: var(--muted); }
+.field input {
+  width: 100%; min-width: 0; font: 500 15px/1.2 var(--font-mono); color: var(--fg);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 9px 10px;
+  font-variant-numeric: tabular-nums;
+}
+.toggles { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.toggles label { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.toggles input { width: 18px; height: 18px; accent-color: var(--accent); }
+
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+.gallery img { width: 100%; height: auto; display: block; border-radius: 2px; box-shadow: 0 1px 3px rgba(0,0,0,.18); }
+
+.toast {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  background: var(--fg); color: var(--bg); padding: 10px 16px; border-radius: 8px; font-weight: 500;
+  font-size: 14px; max-width: calc(100% - 32px); z-index: 20;
+}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>EXIF 參數邊框</h1>
+    <p>一次選多張照片，自動讀出機型、焦距、光圈、快門、ISO，在每張照片下方加上參數邊框。照片只在你的裝置上處理，不會上傳。</p>
+  </header>
+
+  <div class="grid">
+    <section class="stage" id="stage" aria-label="預覽">
+      <span class="badge" id="badge">範例照片</span>
+      <img id="preview" alt="加上參數邊框後的照片預覽">
+      <div class="stagebar">
+        <span class="counter" id="counter">範例</span>
+        <div class="nav" id="nav" hidden>
+          <button type="button" id="prevBtn" aria-label="上一張">‹ 上一張</button>
+          <button type="button" id="nextBtn" aria-label="下一張">下一張 ›</button>
+        </div>
+      </div>
+      <div class="strip" id="strip" role="list" aria-label="已選的照片" hidden></div>
+      <p class="hint" id="previewHint">預覽為縮小版，儲存時輸出原尺寸。</p>
+    </section>
+
+    <div class="panel">
+      <div class="card">
+        <label class="btn primary" for="file" id="pickBtn">選擇照片（可多選）</label>
+        <input type="file" id="file" accept="image/*" multiple>
+        <p class="status" id="status">目前顯示的是範例。從相簿一次選幾張 iPhone 拍的原始照片試試看。</p>
+      </div>
+
+      <div class="card">
+        <p class="label">邊框樣式（套用到全部）</p>
+        <div class="seg" role="radiogroup" aria-label="邊框樣式">
+          <label><input type="radio" name="style" id="style-white" value="white" checked><span class="swatch sw-white"></span>白底</label>
+          <label><input type="radio" name="style" id="style-black" value="black"><span class="swatch sw-black"></span>黑底</label>
+          <label><input type="radio" name="style" id="style-blur" value="blur"><span class="swatch sw-blur"></span>霧面</label>
+        </div>
+        <div class="toggles">
+          <label><input type="checkbox" id="t-date">顯示拍攝時間</label>
+          <label><input type="checkbox" id="t-lens">顯示鏡頭</label>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row">
+          <p class="label" id="fieldsLabel">這張的參數（可手動修改）</p>
+          <button type="button" class="btn small" id="applyAll" hidden>機型套用到全部</button>
+        </div>
+        <div class="fields">
+          <label class="field full"><span>機型</span><input id="f-model" autocomplete="off"></label>
+          <label class="field"><span>等效焦距</span><input id="f-focal" autocomplete="off"></label>
+          <label class="field"><span>光圈</span><input id="f-aperture" autocomplete="off"></label>
+          <label class="field"><span>快門</span><input id="f-shutter" autocomplete="off"></label>
+          <label class="field"><span>ISO</span><input id="f-iso" autocomplete="off"></label>
+          <label class="field full"><span>拍攝時間</span><input id="f-date" autocomplete="off"></label>
+          <label class="field full"><span>鏡頭</span><input id="f-lens" autocomplete="off"></label>
+        </div>
+      </div>
+
+      <div class="card">
+        <p class="label">存檔選項</p>
+        <div class="toggles">
+          <label><input type="checkbox" id="t-exif" checked>寫入 EXIF 拍攝資料</label>
+          <label><input type="checkbox" id="t-gps">保留拍攝地點（GPS）</label>
+        </div>
+        <p class="hint">會把原照片的 EXIF 整份寫進新圖片，「照片」App 會照原本的拍攝時間排序。原照片沒有 EXIF 時，改寫入上面參數欄的值。</p>
+        <div class="btns">
+          <button class="btn primary full" id="saveAllBtn" type="button">全部存到照片</button>
+          <button class="btn" id="zipBtn" type="button">打包成 ZIP</button>
+          <button class="btn" id="saveBtn" type="button">只存這張</button>
+        </div>
+        <p class="status" id="saveStatus"></p>
+        <p class="hint">「全部存到照片」會一張一張跳出儲存視窗，在 iPhone 上每次點「儲存影像」即可。用電腦的話，打包成 ZIP 比較快。</p>
+      </div>
+      <p class="hint">從 LINE、IG、FB 下載或截圖的照片通常已經沒有參數，請用相簿裡的原始照片。</p>
+    </div>
+  </div>
+
+  <section class="card" id="galleryCard" hidden>
+    <p class="label">原尺寸圖片</p>
+    <p class="hint strong">這個環境不能直接存檔。iPhone 請長按每張圖片 →「加入照片」；電腦請按右鍵 →「另存圖片」。</p>
+    <div class="gallery" id="gallery"></div>
+  </section>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/exifr@7.1.3/dist/full.umd.js"></script>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const FIELDS = ["model", "focal", "aperture", "shutter", "iso", "date", "lens"];
+  const NAMES = { model: "機型", focal: "焦距", aperture: "光圈", shutter: "快門", iso: "ISO", date: "時間" };
+  const S = { items: [], cur: 0, style: "white", busy: false };
+  const cache = { item: null, img: null, url: null };
+  let prevURL = null, timer = null, DL = null, renderToken = 0;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // ---------- capability: downloads ----------
+  try { window.claude?.use?.("downloads").then((d) => { DL = d; }).catch(() => {}); } catch (e) {}
+  async function getDL() {
+    if (DL) return DL;
+    try { DL = await window.claude?.use?.("downloads"); } catch (e) { DL = null; }
+    return DL || null;
+  }
+
+  // ---------- formatting ----------
+  const trimNum = (n, d) => String(Math.round(n * 10 ** d) / 10 ** d);
+  function fmtModel(make, model) {
+    make = (make || "").replace(/\s*(CORPORATION|CORP\.?|Co\.,? ?Ltd\.?|IMAGING CORP\.?)\s*$/i, "").trim();
+    model = (model || "").trim();
+    if (!model) return make;
+    if (!make || model.toLowerCase().includes(make.toLowerCase().split(" ")[0])) return model;
+    return make + " " + model;
+  }
+  const fmtAperture = (f) => f ? "f/" + trimNum(f, f < 10 ? 1 : 0) : "";
+  function fmtShutter(t) {
+    if (!t) return "";
+    if (t >= 1) return trimNum(t, 1) + "s";
+    return "1/" + Math.round(1 / t) + "s";
+  }
+  const fmtFocal = (f35, f) => (f35 || f) ? Math.round(f35 || f) + "mm" : "";
+  const fmtISO = (v) => v ? "ISO " + (Array.isArray(v) ? v[0] : v) : "";
+  function fmtDate(d) {
+    if (!d) return "";
+    if (!(d instanceof Date)) {
+      const m = String(d).match(/(\d{4})[:\-](\d{2})[:\-](\d{2})[ T](\d{2}):(\d{2})/);
+      return m ? `${m[1]}.${m[2]}.${m[3]}  ${m[4]}:${m[5]}` : String(d);
+    }
+    if (isNaN(d)) return "";
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}.${p(d.getMonth() + 1)}.${p(d.getDate())}  ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+  const foundOf = (v) => Object.keys(NAMES).filter((k) => v[k]);
+
+  // ---------- sample photo (generated, so the page opens in a working state) ----------
+  function makeSample() {
+    const c = document.createElement("canvas"); c.width = 2400; c.height = 1800;
+    const g = c.getContext("2d");
+    const sky = g.createLinearGradient(0, 0, 0, 1800);
+    sky.addColorStop(0, "#1f2b4d"); sky.addColorStop(0.45, "#7b5c86"); sky.addColorStop(0.72, "#ee9a63"); sky.addColorStop(1, "#f7cf96");
+    g.fillStyle = sky; g.fillRect(0, 0, 2400, 1800);
+    const sun = g.createRadialGradient(1550, 1150, 0, 1550, 1150, 520);
+    sun.addColorStop(0, "rgba(255,236,190,1)"); sun.addColorStop(0.12, "rgba(255,220,160,.95)"); sun.addColorStop(1, "rgba(255,200,140,0)");
+    g.fillStyle = sun; g.fillRect(0, 0, 2400, 1800);
+    const layers = [["#5a4a6e", 1080, 140, 0.004, 1], ["#3c3452", 1220, 170, 0.0031, 2.3], ["#25223a", 1380, 150, 0.0052, 4.1], ["#15141f", 1540, 110, 0.0024, 0.7]];
+    for (const [col, base, amp, fr, ph] of layers) {
+      g.beginPath(); g.moveTo(0, 1800);
+      for (let x = 0; x <= 2400; x += 8) {
+        const y = base - amp * (0.6 * Math.sin(x * fr + ph) + 0.3 * Math.sin(x * fr * 2.7 + ph * 1.9) + 0.1 * Math.sin(x * fr * 7.3));
+        g.lineTo(x, y);
+      }
+      g.lineTo(2400, 1800); g.closePath(); g.fillStyle = col; g.fill();
+    }
+    return c;
+  }
+  const SAMPLE = {
+    sample: true, img: makeSample(), name: "sample",
+    v: { model: "iPhone 15 Pro", focal: "24mm", aperture: "f/1.8", shutter: "1/120s", iso: "ISO 80", date: "2026.11.26  17:42", lens: "Main Camera" },
+  };
+
+  // ---------- image loading (only the current photo is kept decoded, to spare phone memory) ----------
+  function decode(file) {
+    return new Promise((res, rej) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => res({ img, url });
+      img.onerror = () => { URL.revokeObjectURL(url); rej(new Error("decode")); };
+      img.src = url;
+    });
+  }
+  async function getImg(item) {
+    if (item.sample) return item.img;
+    if (cache.item === item) return cache.img;
+    const { img, url } = await decode(item.file);
+    if (cache.url) URL.revokeObjectURL(cache.url);
+    cache.item = item; cache.img = img; cache.url = url;
+    return img;
+  }
+  function thumbOf(img) {
+    const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+    const s = 144 / Math.min(iw, ih);
+    const c = document.createElement("canvas"); c.width = Math.round(iw * s); c.height = Math.round(ih * s);
+    c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+    return c.toDataURL("image/jpeg", 0.7);
+  }
+
+  // ---------- drawing ----------
+  const FONT = '"Inter", "PingFang TC", "Noto Sans TC", "Helvetica Neue", Arial, sans-serif';
+  const dims = (src) => [src.naturalWidth || src.width, src.naturalHeight || src.height];
+
+  function render(img, v, maxEdge) {
+    const [iw, ih] = dims(img);
+    let k;
+    if (maxEdge) k = Math.min(1, maxEdge / Math.max(iw, ih));
+    // Full size unless the framed output would pass iOS Safari's ~16.7 MP canvas limit (only 48 MP photos hit this).
+    else k = Math.min(1, Math.sqrt(16.4e6 / (iw * ih * 1.2)), 8192 / Math.max(iw, ih));
+    const w = Math.round(iw * k), h = Math.round(ih * k);
+    const T = {
+      model: (v.model || "").trim(),
+      params: [v.focal, v.aperture, v.shutter, v.iso].map((s) => (s || "").trim()).filter(Boolean).join("   "),
+      date: $("t-date").checked ? (v.date || "").trim() : "",
+      lens: $("t-lens").checked ? (v.lens || "").trim() : "",
+    };
+    return S.style === "blur" ? drawBlur(img, T, w, h) : drawBar(img, T, w, h, S.style === "black");
+  }
+
+  function drawBar(img, T, w, h, dark) {
+    const u = w / 100;
+    const twoLine = !!(T.date || T.lens);
+    const barH = Math.round(u * (twoLine ? 9.5 : 7.5));
+    const c = document.createElement("canvas"); c.width = w; c.height = h + barH;
+    const g = c.getContext("2d");
+    g.fillStyle = dark ? "#0f0f0f" : "#ffffff"; g.fillRect(0, 0, w, h + barH);
+    g.imageSmoothingQuality = "high";
+    g.drawImage(img, 0, 0, w, h);
+
+    const pad = 4 * u;
+    let s = 1;
+    const fL1 = () => `700 ${2.6 * u * s}px ${FONT}`, fR1 = () => `600 ${2.25 * u * s}px ${FONT}`, f2 = () => `400 ${1.6 * u * s}px ${FONT}`;
+    const width = () => {
+      g.font = fL1(); let lw = g.measureText(T.model).width; g.font = f2(); lw = Math.max(lw, g.measureText(T.date).width);
+      g.font = fR1(); let rw = g.measureText(T.params).width; g.font = f2(); rw = Math.max(rw, g.measureText(T.lens).width);
+      return [lw, rw];
+    };
+    let [lw, rw] = width();
+    while (lw + rw + 8 * u > w - 2 * pad && s > 0.45) { s -= 0.05; [lw, rw] = width(); }
+
+    const c1 = dark ? "#f1f1f1" : "#141414", c2 = "#8c8c8c";
+    const y1 = twoLine ? h + barH * 0.45 : h + barH * 0.5, y2 = h + barH * 0.75;
+    g.textBaseline = twoLine ? "alphabetic" : "middle";
+    g.textAlign = "left"; g.fillStyle = c1; g.font = fL1(); g.fillText(T.model, pad, y1);
+    g.textAlign = "right"; g.font = fR1(); g.fillText(T.params, w - pad, y1);
+    g.fillStyle = c2; g.font = f2(); g.textBaseline = "alphabetic";
+    if (T.date) { g.textAlign = "left"; g.fillText(T.date, pad, y2); }
+    if (T.lens) { g.textAlign = "right"; g.fillText(T.lens, w - pad, y2); }
+
+    if (T.params && rw > 0) { // thin divider before the parameter block
+      const x = w - pad - rw - 2.2 * u;
+      g.fillStyle = dark ? "#333" : "#dedede";
+      g.fillRect(x, h + barH * (twoLine ? 0.22 : 0.3), Math.max(1, u * 0.12), barH * (twoLine ? 0.6 : 0.4));
+    }
+    return c;
+  }
+
+  function drawBlur(img, T, w, h) {
+    const u = w / 100;
+    const m = 6 * u;
+    const pw = w - 2 * m, ph = Math.round(h * pw / w);
+    const sub = [T.date, T.lens].filter(Boolean).join("   ·   ");
+    const three = !!sub;
+    const textH = u * (three ? 17 : 13);
+    const W = w, H = Math.round(m + ph + textH);
+    const c = document.createElement("canvas"); c.width = W; c.height = H;
+    const g = c.getContext("2d");
+
+    // blurred backdrop: cover-draw into a small canvas, blur there, then scale up
+    const sw = Math.max(16, Math.round(W / 12)), sh = Math.max(16, Math.round(H / 12));
+    const sc = document.createElement("canvas"); sc.width = sw; sc.height = sh;
+    const sg = sc.getContext("2d");
+    const [iw, ih] = dims(img);
+    const cover = Math.max(sw / iw, sh / ih) * 1.15;
+    if (typeof sg.filter === "string") sg.filter = "blur(3px)";
+    sg.drawImage(img, (sw - iw * cover) / 2, (sh - ih * cover) / 2, iw * cover, ih * cover);
+    g.imageSmoothingEnabled = true; g.imageSmoothingQuality = "high";
+    g.drawImage(sc, 0, 0, W, H);
+    g.fillStyle = "rgba(0,0,0,0.38)"; g.fillRect(0, 0, W, H);
+
+    const r = 0.8 * u;
+    const rr = (x, y, ww, hh) => { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + ww, y, x + ww, y + hh, r); g.arcTo(x + ww, y + hh, x, y + hh, r); g.arcTo(x, y + hh, x, y, r); g.arcTo(x, y, x + ww, y, r); g.closePath(); };
+    g.save(); g.shadowColor = "rgba(0,0,0,0.45)"; g.shadowBlur = 3 * u; g.shadowOffsetY = 1 * u;
+    rr(m, m, pw, ph); g.fillStyle = "#000"; g.fill(); g.restore();
+    g.save(); rr(m, m, pw, ph); g.clip(); g.imageSmoothingQuality = "high"; g.drawImage(img, m, m, pw, ph); g.restore();
+
+    let s = 1;
+    const f1 = () => `700 ${2.9 * u * s}px ${FONT}`, fp = () => `500 ${2.15 * u * s}px ${FONT}`, f3 = () => `400 ${1.55 * u * s}px ${FONT}`;
+    const maxW = () => { g.font = f1(); let a = g.measureText(T.model).width; g.font = fp(); a = Math.max(a, g.measureText(T.params).width); g.font = f3(); return Math.max(a, g.measureText(sub).width); };
+    while (maxW() > pw && s > 0.45) s -= 0.05;
+    const top = m + ph;
+    g.textAlign = "center"; g.textBaseline = "alphabetic";
+    g.fillStyle = "#ffffff"; g.font = f1(); g.fillText(T.model, W / 2, top + textH * (three ? 0.36 : 0.44));
+    g.fillStyle = "rgba(255,255,255,0.86)"; g.font = fp(); g.fillText(T.params, W / 2, top + textH * (three ? 0.58 : 0.72));
+    if (sub) { g.fillStyle = "rgba(255,255,255,0.6)"; g.font = f3(); g.fillText(sub, W / 2, top + textH * 0.78); }
+    return c;
+  }
+
+  const toBlob = (c, q) => new Promise((res) => c.toBlob(res, "image/jpeg", q));
+  async function renderFull(item) {
+    const img = await getImg(item);
+    const c = render(img, item.v, 0);
+    const blob = await toBlob(c, 0.95);
+    if (!blob) throw new Error("render");
+    if (!$("t-exif").checked) return blob;
+    try {
+      const seg = item.exifSeg
+        ? patchExif(item.exifSeg.slice(), c.width, c.height, $("t-gps").checked)
+        : buildExif(item.v, c.width, c.height);
+      return seg ? await insertExif(blob, seg) : blob;
+    } catch (e) {
+      return blob; // never block a save because of metadata
+    }
+  }
+
+  // ---------- EXIF: copy the original APP1 block into the new JPEG ----------
+  // Canvas output carries no metadata, so the original "Exif\0\0"+TIFF payload is read from the
+  // source file, patched (orientation, pixel size, thumbnail, GPS) and inserted after SOI.
+  async function readExifSegment(file) {
+    const buf = new Uint8Array(await file.slice(0, 512 * 1024).arrayBuffer());
+    if (buf[0] !== 0xFF || buf[1] !== 0xD8) return null; // not a JPEG
+    let p = 2;
+    while (p + 4 < buf.length) {
+      if (buf[p] !== 0xFF) return null;
+      const m = buf[p + 1];
+      if (m === 0xFF) { p++; continue; }
+      if (m === 0x01 || (m >= 0xD0 && m <= 0xD8)) { p += 2; continue; }
+      if (m === 0xDA || m === 0xD9) return null;
+      const len = (buf[p + 2] << 8) | buf[p + 3];
+      if (m === 0xE1 && buf[p + 4] === 0x45 && buf[p + 5] === 0x78 && buf[p + 6] === 0x69 && buf[p + 7] === 0x66 && buf[p + 8] === 0 && buf[p + 9] === 0) {
+        if (p + 2 + len > buf.length) return null;
+        return buf.slice(p + 4, p + 2 + len);
+      }
+      p += 2 + len;
+    }
+    return null;
+  }
+
+  const TYPE_SIZE = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 7: 1, 8: 2, 9: 4, 10: 8, 11: 4, 12: 8 };
+  function patchExif(seg, w, h, keepGPS) {
+    const T = 6; // TIFF header starts after "Exif\0\0"
+    const dv = new DataView(seg.buffer, seg.byteOffset, seg.byteLength);
+    const le = dv.getUint16(T) === 0x4949;
+    const g16 = (o) => dv.getUint16(T + o, le), g32 = (o) => dv.getUint32(T + o, le);
+    const s16 = (o, v) => dv.setUint16(T + o, v, le), s32 = (o, v) => dv.setUint32(T + o, v, le);
+    if (g16(2) !== 42) return null;
+    const ifd0 = g32(4), n0 = g16(ifd0);
+    let exifPtr = 0, gpsPtr = 0;
+    for (let i = 0; i < n0; i++) {
+      const e = ifd0 + 2 + i * 12, tag = g16(e);
+      if (tag === 0x0112) s16(e + 8, 1);          // pixels are already upright
+      else if (tag === 0x8769) exifPtr = g32(e + 8);
+      else if (tag === 0x8825) gpsPtr = g32(e + 8);
+    }
+    s32(ifd0 + 2 + n0 * 12, 0);                    // unlink IFD1 (old thumbnail without the frame)
+    if (exifPtr) {
+      const n = g16(exifPtr);
+      for (let i = 0; i < n; i++) {
+        const e = exifPtr + 2 + i * 12, tag = g16(e), type = g16(e + 2);
+        if (tag === 0xA002 || tag === 0xA003) {
+          const v = tag === 0xA002 ? w : h;
+          if (type === 3) s16(e + 8, Math.min(v, 65535)); else s32(e + 8, v);
+        }
+      }
+    }
+    if (gpsPtr && !keepGPS) {                      // wipe location values, then empty the GPS IFD
+      const n = g16(gpsPtr);
+      for (let i = 0; i < n; i++) {
+        const e = gpsPtr + 2 + i * 12, size = (TYPE_SIZE[g16(e + 2)] || 1) * g32(e + 4);
+        if (size > 4) { const off = g32(e + 8); for (let k = 0; k < size && T + off + k < seg.length; k++) seg[T + off + k] = 0; }
+      }
+      for (let k = 0; k < n * 12 + 2; k++) seg[T + gpsPtr + 2 + k] = 0;
+      s16(gpsPtr, 0); s32(gpsPtr + 2, 0);
+    }
+    return seg;
+  }
+
+  // For photos with no EXIF (screenshots, chat-app copies, HEIC sources): write the fields shown on the frame.
+  function buildExif(v, w, h) {
+    const te = new TextEncoder();
+    const ascii = (s) => { const b = te.encode(s); const a = new Uint8Array(b.length + 1); a.set(b); return a; };
+    const be = (n, bytes) => { const a = new Uint8Array(bytes); for (let i = bytes - 1; i >= 0; i--) { a[i] = n & 255; n = Math.floor(n / 256); } return a; };
+    const E = (tag, type, val) => {
+      let bytes, count;
+      if (type === 2) { bytes = ascii(val); count = bytes.length; }
+      else if (type === 7) { bytes = te.encode(val); count = bytes.length; }
+      else if (type === 3) { bytes = be(val, 2); count = 1; }
+      else if (type === 4) { bytes = be(val, 4); count = 1; }
+      else { bytes = new Uint8Array([...be(val[0], 4), ...be(val[1], 4)]); count = 1; }
+      return { tag, type, count, bytes };
+    };
+    const num = (s) => { const m = String(s || "").match(/\d+(?:\.\d+)?/); return m ? parseFloat(m[0]) : 0; };
+    const ifd0 = [], ex = [];
+    const model = (v.model || "").trim();
+    if (/^iphone|^ipad/i.test(model)) ifd0.push(E(0x010F, 2, "Apple"));
+    if (model) ifd0.push(E(0x0110, 2, model));
+    ifd0.push(E(0x0112, 3, 1));
+    const dm = String(v.date || "").match(/(\d{4})\D(\d{1,2})\D(\d{1,2})\D+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+    const p2 = (x) => String(x).padStart(2, "0");
+    const dt = dm ? `${dm[1]}:${p2(dm[2])}:${p2(dm[3])} ${p2(dm[4])}:${dm[5]}:${dm[6] || "00"}` : "";
+    if (dt) ifd0.push(E(0x0132, 2, dt));
+    const sh = String(v.shutter || "").trim(), m1 = sh.match(/^1\/(\d+(?:\.\d+)?)/);
+    if (m1) ex.push(E(0x829A, 5, [1, Math.round(parseFloat(m1[1]))]));
+    else if (num(sh)) ex.push(E(0x829A, 5, [Math.round(num(sh) * 10), 10]));
+    if (num(v.aperture)) ex.push(E(0x829D, 5, [Math.round(num(v.aperture) * 100), 100]));
+    if (num(v.iso)) ex.push(E(0x8827, 3, Math.min(65535, Math.round(num(v.iso)))));
+    ex.push(E(0x9000, 7, "0232"));
+    if (dt) ex.push(E(0x9003, 2, dt));
+    ex.push(E(0xA002, 4, w), E(0xA003, 4, h));
+    if (num(v.focal)) ex.push(E(0xA405, 3, Math.min(65535, Math.round(num(v.focal)))));
+    if ((v.lens || "").trim()) ex.push(E(0xA434, 2, v.lens.trim()));
+    if (!model && !dt && ex.length <= 3) return null; // nothing worth writing
+    const ptr = E(0x8769, 4, 0); ifd0.push(ptr);
+    ifd0.sort((a, b) => a.tag - b.tag); ex.sort((a, b) => a.tag - b.tag);
+
+    const off0 = 8, offE = off0 + 2 + ifd0.length * 12 + 4;
+    let data = offE + 2 + ex.length * 12 + 4;
+    ptr.bytes = be(offE, 4);
+    const place = [];
+    for (const e of [...ifd0, ...ex]) if (e.bytes.length > 4) { e.off = data; place.push(e); data += e.bytes.length + (e.bytes.length & 1); }
+    const tiff = new Uint8Array(data), dv = new DataView(tiff.buffer);
+    tiff.set([0x4D, 0x4D, 0, 42, 0, 0, 0, 8]);
+    const writeIfd = (list, at) => {
+      dv.setUint16(at, list.length);
+      list.forEach((e, i) => {
+        const o = at + 2 + i * 12;
+        dv.setUint16(o, e.tag); dv.setUint16(o + 2, e.type); dv.setUint32(o + 4, e.count);
+        if (e.bytes.length > 4) dv.setUint32(o + 8, e.off); else tiff.set(e.bytes, o + 8);
+      });
+      dv.setUint32(at + 2 + list.length * 12, 0);
+    };
+    writeIfd(ifd0, off0); writeIfd(ex, offE);
+    for (const e of place) tiff.set(e.bytes, e.off);
+    const seg = new Uint8Array(6 + tiff.length);
+    seg.set([0x45, 0x78, 0x69, 0x66, 0, 0]); seg.set(tiff, 6);
+    return seg;
+  }
+
+  async function insertExif(blob, seg) {
+    const len = seg.length + 2;
+    if (len > 0xFFFF) return blob;
+    const out = new Uint8Array(await blob.arrayBuffer());
+    let p = 2;
+    if (out[2] === 0xFF && out[3] === 0xE0) p = 4 + ((out[4] << 8) | out[5]); // drop canvas JFIF APP0
+    const hdr = new Uint8Array([0xFF, 0xE1, len >> 8, len & 255]);
+    return new Blob([out.subarray(0, 2), hdr, seg, out.subarray(p)], { type: "image/jpeg" });
+  }
+
+  // ---------- current item / preview ----------
+  const curItem = () => S.items[S.cur] || SAMPLE;
+  async function updatePreview() {
+    const item = curItem();
+    const token = ++renderToken;
+    let img;
+    try { img = await getImg(item); } catch (e) { return; }
+    if (token !== renderToken) return;
+    const b = await toBlob(render(img, item.v, 1600), 0.88);
+    if (!b || token !== renderToken) return;
+    if (prevURL) URL.revokeObjectURL(prevURL);
+    prevURL = URL.createObjectURL(b);
+    $("preview").src = prevURL;
+  }
+  function schedule() { clearTimeout(timer); timer = setTimeout(updatePreview, 120); }
+
+  function setStatus(msg, kind) { const el = $("status"); el.textContent = msg; el.className = "status" + (kind ? " " + kind : ""); }
+  function setSaveStatus(msg, kind) { const el = $("saveStatus"); el.textContent = msg; el.className = "status" + (kind ? " " + kind : ""); }
+  let toastTimer;
+  function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 2600); }
+
+  function itemMessage(item) {
+    const f = foundOf(item.v).map((k) => NAMES[k]);
+    if (item.found >= 4) return ["已讀到：" + f.join("、"), "ok"];
+    if (item.found > 0) return ["只讀到：" + item.foundNames + "。其餘可在下方手動填。", "warn"];
+    return ["這張沒有拍攝參數（可能經過通訊軟體傳送或是截圖），可在下方手動填。", "warn"];
+  }
+
+  function select(i) {
+    if (!S.items.length) return;
+    S.cur = Math.max(0, Math.min(S.items.length - 1, i));
+    const item = S.items[S.cur];
+    for (const k of FIELDS) $("f-" + k).value = item.v[k] || "";
+    $("counter").textContent = `第 ${S.cur + 1} / ${S.items.length} 張 · ${item.name}`;
+    $("prevBtn").disabled = S.cur === 0;
+    $("nextBtn").disabled = S.cur === S.items.length - 1;
+    document.querySelectorAll(".thumb").forEach((t, j) => t.setAttribute("aria-current", j === S.cur ? "true" : "false"));
+    const cur = document.querySelectorAll(".thumb")[S.cur];
+    if (cur) cur.scrollIntoView({ block: "nearest", inline: "nearest" });
+    const [msg, kind] = itemMessage(item);
+    setStatus(msg, kind);
+    updatePreview();
+  }
+
+  function renderStrip() {
+    const strip = $("strip");
+    strip.textContent = "";
+    S.items.forEach((item, i) => {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "thumb"; b.setAttribute("role", "listitem");
+      b.setAttribute("aria-label", `第 ${i + 1} 張 ${item.name}`);
+      b.setAttribute("aria-current", i === S.cur ? "true" : "false");
+      if (item.thumb) { const im = document.createElement("img"); im.alt = ""; im.src = item.thumb; b.appendChild(im); }
+      const dot = document.createElement("span");
+      dot.className = "dot" + (item.thumb == null ? " busy" : item.found >= 4 ? "" : " warn");
+      b.appendChild(dot);
+      b.addEventListener("click", () => select(i));
+      strip.appendChild(b);
+    });
+  }
+
+  function refreshButtons() {
+    const n = S.items.length;
+    $("saveAllBtn").textContent = n > 1 ? `全部存到照片（${n} 張）` : "存到照片";
+    $("zipBtn").hidden = n < 2;
+    $("saveBtn").hidden = n < 2;
+    $("applyAll").hidden = n < 2;
+    $("nav").hidden = n < 2;
+    $("strip").hidden = n < 2;
+    $("fieldsLabel").textContent = n > 1 ? "這張的參數（可手動修改）" : "參數（可手動修改）";
+  }
+
+  // ---------- load photos ----------
+  async function loadFiles(files) {
+    files = Array.from(files || []).filter((f) => !f.type || f.type.startsWith("image/"));
+    if (!files.length || S.busy) return;
+    S.busy = true;
+    $("badge").hidden = true;
+    $("galleryCard").hidden = true;
+    const items = files.map((f) => ({
+      file: f, name: (f.name || "photo").replace(/\.[^.]+$/, "") || "photo",
+      v: {}, found: 0, foundNames: "", thumb: null, bad: false,
+    }));
+    S.items = items; S.cur = 0;
+    cache.item = null;
+    refreshButtons(); renderStrip();
+
+    let ok = 0, bad = 0;
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      setStatus(`讀取中… ${i + 1} / ${items.length}`);
+      let ex = null;
+      try {
+        if (window.exifr) ex = await exifr.parse(it.file, { tiff: true, exif: true, gps: false, xmp: false, icc: false, iptc: false, interop: false });
+      } catch (e) { ex = null; }
+      ex = ex || {};
+      it.v = {
+        model: fmtModel(ex.Make, ex.Model),
+        focal: fmtFocal(ex.FocalLengthIn35mmFormat, ex.FocalLength),
+        aperture: fmtAperture(ex.FNumber || (ex.ApertureValue && Math.pow(2, ex.ApertureValue / 2))),
+        shutter: fmtShutter(ex.ExposureTime),
+        iso: fmtISO(ex.ISO || ex.ISOSpeedRatings || ex.PhotographicSensitivity),
+        date: fmtDate(ex.DateTimeOriginal || ex.CreateDate || ex.ModifyDate),
+        lens: (ex.LensModel || "").trim(),
+      };
+      const f = foundOf(it.v);
+      it.found = f.length; it.foundNames = f.map((k) => NAMES[k]).join("、");
+      try { it.exifSeg = await readExifSegment(it.file); } catch (e) { it.exifSeg = null; }
+      try {
+        const { img, url } = await decode(it.file);
+        it.thumb = thumbOf(img);
+        if (i === 0) { cache.item = it; cache.img = img; cache.url = url; } else URL.revokeObjectURL(url);
+        ok++;
+      } catch (e) {
+        it.bad = true; it.thumb = ""; bad++;
+      }
+      if (i === 0) select(0);
+      renderStrip();
+      await sleep(0);
+    }
+    if (bad) S.items = S.items.filter((it) => !it.bad);
+    S.busy = false;
+    refreshButtons(); renderStrip();
+    if (!S.items.length) {
+      S.items = []; $("badge").hidden = false; setStatus("這些檔案都打不開。若是 HEIC，請從「照片」直接選取，iPhone 會自動轉成 JPEG。", "warn");
+      $("counter").textContent = "範例"; updatePreview(); return;
+    }
+    select(Math.min(S.cur, S.items.length - 1));
+    const noExif = S.items.filter((it) => it.found < 4).length;
+    let msg = `已載入 ${S.items.length} 張`;
+    if (bad) msg += `，${bad} 張打不開已略過`;
+    if (noExif) msg += `；${noExif} 張參數不完整（縮圖上橘色點），點縮圖可手動補`;
+    setStatus(msg + "。", noExif || bad ? "warn" : "ok");
+  }
+
+  // ---------- save ----------
+  const fileName = (item, used) => {
+    let base = (item.sample ? "sample" : item.name).replace(/[\\/:*?"<>|]/g, "_") + "_exif";
+    let n = base, k = 2;
+    if (used) { while (used.has(n)) n = base + "_" + k++; used.add(n); }
+    return n + ".jpg";
+  };
+  function lockButtons(on) { ["saveAllBtn", "zipBtn", "saveBtn", "pickBtn"].forEach((id) => { const el = $(id); if (el.tagName === "BUTTON") el.disabled = on; else el.style.pointerEvents = on ? "none" : ""; }); }
+
+  async function saveOne(d, blob, filename) {
+    for (let tries = 0; ; tries++) {
+      try { await d.save({ filename, data: blob }); return "saved"; }
+      catch (e) {
+        if (e && e.code === "rate_limited" && tries < 6) { await sleep(1200); continue; }
+        if (e && e.code === "declined") return "declined";
+        throw e;
+      }
+    }
+  }
+
+  async function showGallery(list) {
+    const gal = $("gallery");
+    gal.querySelectorAll("img").forEach((im) => URL.revokeObjectURL(im.src));
+    gal.textContent = "";
+    $("galleryCard").hidden = false;
+    for (let i = 0; i < list.length; i++) {
+      setSaveStatus(`產生原尺寸圖片… ${i + 1} / ${list.length}`);
+      const blob = await renderFull(list[i]);
+      const im = document.createElement("img");
+      im.alt = list[i].name; im.src = URL.createObjectURL(blob);
+      gal.appendChild(im);
+      await sleep(0);
+    }
+    setSaveStatus("");
+    $("galleryCard").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  async function saveList(list) {
+    if (S.busy) return;
+    S.busy = true; lockButtons(true);
+    try {
+      const d = await getDL();
+      if (!d) { await showGallery(list); return; }
+      let saved = 0;
+      const used = new Set();
+      for (let i = 0; i < list.length; i++) {
+        setSaveStatus(list.length > 1 ? `儲存中… 第 ${i + 1} / ${list.length} 張` : "產生中…");
+        const blob = await renderFull(list[i]);
+        let r;
+        try { r = await saveOne(d, blob, fileName(list[i], used)); }
+        catch (e) { await showGallery(list.slice(i)); setSaveStatus(saved ? `已存 ${saved} 張；其餘請在下方長按存檔。` : "", "warn"); return; }
+        if (r === "declined") {
+          setSaveStatus(saved ? `已存 ${saved} 張，在第 ${i + 1} 張取消後停止。` : "已取消。", "warn");
+          return;
+        }
+        saved++;
+      }
+      setSaveStatus(list.length > 1 ? `已存 ${saved} 張。` : "已儲存。", "ok");
+      toast(list.length > 1 ? `已存 ${saved} 張` : "已儲存");
+    } catch (e) {
+      setSaveStatus("產生圖片失敗，照片可能太大，換一張試試。", "warn");
+    } finally {
+      S.busy = false; lockButtons(false); updatePreview();
+    }
+  }
+
+  async function saveZip() {
+    if (S.busy) return;
+    if (!window.JSZip) { setSaveStatus("ZIP 元件沒有載入，請改用「全部存到照片」。", "warn"); return; }
+    S.busy = true; lockButtons(true);
+    try {
+      const zip = new JSZip();
+      const used = new Set();
+      for (let i = 0; i < S.items.length; i++) {
+        setSaveStatus(`打包中… ${i + 1} / ${S.items.length}`);
+        zip.file(fileName(S.items[i], used), await renderFull(S.items[i]));
+        await sleep(0);
+      }
+      const blob = await zip.generateAsync({ type: "blob", compression: "STORE" });
+      const d = await getDL();
+      if (!d) { // standalone page (outside Claude): a plain download link works there
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob); a.download = `exif-frames-${S.items.length}.zip`;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+        setSaveStatus(`已打包 ${S.items.length} 張。`, "ok");
+        return;
+      }
+      const r = await saveOne(d, blob, `exif-frames-${S.items.length}.zip`);
+      setSaveStatus(r === "declined" ? "已取消。" : `已打包 ${S.items.length} 張。`, r === "declined" ? "warn" : "ok");
+    } catch (e) {
+      setSaveStatus("打包失敗，照片太多或太大，請分批處理。", "warn");
+    } finally {
+      S.busy = false; lockButtons(false); updatePreview();
+    }
+  }
+
+  $("saveAllBtn").addEventListener("click", () => saveList(S.items.length ? S.items.slice() : [SAMPLE]));
+  $("saveBtn").addEventListener("click", () => saveList([curItem()]));
+  $("zipBtn").addEventListener("click", saveZip);
+
+  // ---------- wiring ----------
+  $("file").addEventListener("change", (e) => { loadFiles(e.target.files); e.target.value = ""; });
+  document.querySelectorAll('input[name="style"]').forEach((r) => r.addEventListener("change", () => { S.style = r.value; schedule(); }));
+  for (const k of FIELDS) $("f-" + k).addEventListener("input", (e) => {
+    const item = curItem();
+    item.v[k] = e.target.value;
+    if (!item.sample) {
+      const f = foundOf(item.v); item.found = f.length; item.foundNames = f.map((x) => NAMES[x]).join("、");
+      const dot = document.querySelectorAll(".thumb .dot")[S.cur];
+      if (dot) dot.className = "dot" + (item.found >= 4 ? "" : " warn");
+    }
+    schedule();
+  });
+  $("t-date").addEventListener("change", schedule);
+  $("t-lens").addEventListener("change", schedule);
+  $("t-exif").addEventListener("change", () => { $("t-gps").disabled = !$("t-exif").checked; });
+  $("prevBtn").addEventListener("click", () => select(S.cur - 1));
+  $("nextBtn").addEventListener("click", () => select(S.cur + 1));
+  $("applyAll").addEventListener("click", () => {
+    const m = $("f-model").value;
+    S.items.forEach((it) => { it.v.model = m; const f = foundOf(it.v); it.found = f.length; it.foundNames = f.map((x) => NAMES[x]).join("、"); });
+    renderStrip(); toast(`已把機型「${m}」套用到 ${S.items.length} 張`);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.target.tagName === "INPUT" || S.items.length < 2) return;
+    if (e.key === "ArrowLeft") select(S.cur - 1);
+    if (e.key === "ArrowRight") select(S.cur + 1);
+  });
+
+  const stage = $("stage");
+  stage.addEventListener("dragover", (e) => { e.preventDefault(); stage.classList.add("drag"); });
+  stage.addEventListener("dragleave", () => stage.classList.remove("drag"));
+  stage.addEventListener("drop", (e) => { e.preventDefault(); stage.classList.remove("drag"); loadFiles(e.dataTransfer.files); });
+
+  // ---------- start with the sample ----------
+  for (const k of FIELDS) $("f-" + k).value = SAMPLE.v[k];
+  refreshButtons();
+  const ready = document.fonts && document.fonts.load
+    ? Promise.all([document.fonts.load("700 40px Inter"), document.fonts.load("600 40px Inter"), document.fonts.load("400 40px Inter")]).catch(() => {})
+    : Promise.resolve();
+  Promise.race([ready, sleep(1500)]).then(updatePreview);
+  if (document.fonts) document.fonts.ready.then(() => { if (!S.items.length) updatePreview(); });
+})();
+</script>
+
+</body>
+</html>
