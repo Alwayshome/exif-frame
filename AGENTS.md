@@ -39,9 +39,11 @@
   - `patchExif`：Orientation 改成 1，因為像素已經轉正；PixelX／YDimension 改成新尺寸；斷開 IFD1，移除舊縮圖；不保留 GPS 時清空 GPS 值和 GPS IFD。
   - `buildExif`：原圖沒有 EXIF 時（截圖、HEIC 來源），用參數欄的值寫一份最小的 EXIF。
   - `insertExif`：移除 canvas 產生的 JFIF APP0，在 SOI 後面插入 APP1。
-- **存檔**（`saveList`、`saveZip`、`showGallery`）：
-  - 在 Artifact 裡：用 `claude.use("downloads")` 的 `save()` 一張一張存；iOS Claude App 會跳出分享選單。
-  - 一般網頁（沒有 `window.claude`）：先產生所有圖片顯示在下方，再由「一次存到照片」按鈕呼叫 `navigator.share({files})`。分享選單只能在使用者點擊當下打開，產生圖片要好幾秒，所以一定要兩段式，不能改回一鍵。
+- **存檔**是兩段式（`produce`、`saveMade`、`saveZip`）：
+  - 「產製」（`produce`）：把每張照片產生成原尺寸 JPEG（`File` 物件存在 `S.made`），顯示在下方「產製結果」，做完才顯示「一次儲存」按鈕（`shareBtn`）。
+  - 「一次儲存」（`saveMade`）：`S.saveMode` 決定怎麼存。Artifact 裡是 `downloads`，用 `claude.use("downloads")` 的 `save()` 一張一張存，iOS Claude App 會跳出分享選單；一般網頁是 `share`，呼叫 `navigator.share({files})`。分享選單只能在使用者點擊當下打開，產生圖片要好幾秒，所以一定要兩段式，不能改回一鍵；`share` 分支在點擊後要立刻呼叫，前面不能 await。
+  - 兩者都不行時隱藏按鈕，提示長按或右鍵存檔。
+  - 產製後改了樣式、勾選項或參數欄，`staleMade()` 會清掉產製結果，要求重新產製，避免存到舊設定的圖。
   - ZIP：Artifact 裡走 downloads，一般網頁用 `<a download>`。iPhone 上 ZIP 只能存到「檔案」，不能直接進照片。
 - **偏好設定**：樣式和四個勾選項（`t-date`、`t-lens`、`t-exif`、`t-gps`）存在 localStorage，key 是 `exif-frame:prefs:v1`，所有讀寫都包在 try/catch。
 
@@ -51,12 +53,13 @@
 - 「顯示拍攝時間」預設**不勾**；「顯示鏡頭」預設不勾；「寫入 EXIF」預設勾；「保留 GPS」預設**不勾**（隱私考量）。
 - 原圖有 EXIF 時寫回原本那份；在參數欄手動改的值只影響邊框上的文字，不會寫進 EXIF。
 - 邊框不放任何品牌 Logo，只放文字。
+- 機型：Make 是 Apple 時只顯示 Model（例如「iPhone 15 Pro」），不加「Apple」（`fmtModel`）。
 - Artifact 裡不能用 `<a download>`、`alert`、`confirm`、Web Share，存檔一律走 `downloads` capability。
 
 ## 驗證狀態
 
 - 使用者已確認：iPhone 上能讀到參數、能一次處理多張、Artifact 版能存檔，「照片」App 裡看得到寫回的 EXIF。
-- 尚未實機驗證：Pages 版用分享選單一次存多張到照片；張數很多時 iOS 分享選單會不會失敗；localStorage 記住選項。
+- 尚未實機驗證：兩段式「產製 → 一次儲存」流程（Artifact 與 Pages 版）；Pages 版用分享選單一次存多張到照片；張數很多時 iOS 分享選單會不會失敗；localStorage 記住選項。
 
 ## 可能的後續
 

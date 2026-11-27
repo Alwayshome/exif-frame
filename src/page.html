@@ -209,21 +209,22 @@ header p { margin: 4px 0 0; color: var(--muted); max-width: 60ch; }
         </div>
         <p class="hint">會把原照片的 EXIF 整份寫進新圖片，「照片」App 會照原本的拍攝時間排序。原照片沒有 EXIF 時，改寫入上面參數欄的值。</p>
         <div class="btns">
-          <button class="btn primary full" id="saveAllBtn" type="button">全部存到照片</button>
+          <button class="btn primary full" id="saveAllBtn" type="button">產製</button>
           <button class="btn" id="zipBtn" type="button">打包成 ZIP</button>
-          <button class="btn" id="saveBtn" type="button">只存這張</button>
+          <button class="btn" id="saveBtn" type="button">只產製這張</button>
         </div>
         <p class="status" id="saveStatus"></p>
-        <p class="hint">「全部存到照片」在 iPhone 上會跳出分享選單，選「儲存影像」即可。用電腦的話，打包成 ZIP 比較快；ZIP 在 iPhone 上只能存到「檔案」，不能直接進照片。</p>
+        <p class="hint">按「產製」會在下方做出原尺寸圖片，做好後再按「一次儲存」存進照片（iPhone 會跳出分享選單，選「儲存影像」）。用電腦的話，打包成 ZIP 比較快；ZIP 在 iPhone 上只能存到「檔案」，不能直接進照片。</p>
       </div>
       <p class="hint">從 LINE、IG、FB 下載或截圖的照片通常已經沒有參數，請用相簿裡的原始照片。</p>
     </div>
   </div>
 
   <section class="card" id="galleryCard" hidden>
-    <p class="label">原尺寸圖片</p>
-    <button class="btn primary" id="shareBtn" type="button" hidden>一次存到照片</button>
-    <p class="hint strong" id="galleryHint">這個環境不能直接存檔。iPhone 請長按每張圖片 →「加入照片」；電腦請按右鍵 →「另存圖片」。</p>
+    <p class="label">產製結果</p>
+    <button class="btn primary" id="shareBtn" type="button" hidden>一次儲存</button>
+    <p class="status" id="madeStatus"></p>
+    <p class="hint strong" id="galleryHint"></p>
     <div class="gallery" id="gallery"></div>
   </section>
 </div>
@@ -255,7 +256,7 @@ header p { margin: 4px 0 0; color: var(--muted); max-width: 60ch; }
     make = (make || "").replace(/\s*(CORPORATION|CORP\.?|Co\.,? ?Ltd\.?|IMAGING CORP\.?)\s*$/i, "").trim();
     model = (model || "").trim();
     if (!model) return make;
-    if (!make || model.toLowerCase().includes(make.toLowerCase().split(" ")[0])) return model;
+    if (!make || /^apple$/i.test(make) || model.toLowerCase().includes(make.toLowerCase().split(" ")[0])) return model;
     return make + " " + model;
   }
   const fmtAperture = (f) => f ? "f/" + trimNum(f, f < 10 ? 1 : 0) : "";
@@ -642,7 +643,7 @@ header p { margin: 4px 0 0; color: var(--muted); max-width: 60ch; }
 
   function refreshButtons() {
     const n = S.items.length;
-    $("saveAllBtn").textContent = n > 1 ? `全部存到照片（${n} 張）` : "存到照片";
+    $("saveAllBtn").textContent = n > 1 ? `產製全部（${n} 張）` : "產製";
     $("zipBtn").hidden = n < 2;
     $("saveBtn").hidden = n < 2;
     $("applyAll").hidden = n < 2;
@@ -657,7 +658,7 @@ header p { margin: 4px 0 0; color: var(--muted); max-width: 60ch; }
     if (!files.length || S.busy) return;
     S.busy = true;
     $("badge").hidden = true;
-    $("galleryCard").hidden = true;
+    clearMade();
     const items = files.map((f) => ({
       file: f, name: (f.name || "photo").replace(/\.[^.]+$/, "") || "photo",
       v: {}, found: 0, foundNames: "", thumb: null, bad: false,
@@ -721,7 +722,7 @@ header p { margin: 4px 0 0; color: var(--muted); max-width: 60ch; }
     if (used) { while (used.has(n)) n = base + "_" + k++; used.add(n); }
     return n + ".jpg";
   };
-  function lockButtons(on) { ["saveAllBtn", "zipBtn", "saveBtn", "pickBtn"].forEach((id) => { const el = $(id); if (el.tagName === "BUTTON") el.disabled = on; else el.style.pointerEvents = on ? "none" : ""; }); }
+  function lockButtons(on) { ["saveAllBtn", "zipBtn", "saveBtn", "pickBtn", "shareBtn"].forEach((id) => { const el = $(id); if (el.tagName === "BUTTON") el.disabled = on; else el.style.pointerEvents = on ? "none" : ""; }); }
 
   async function saveOne(d, blob, filename) {
     for (let tries = 0; ; tries++) {
@@ -734,61 +735,98 @@ header p { margin: 4px 0 0; color: var(--muted); max-width: 60ch; }
     }
   }
 
-  async function showGallery(list) {
+  // ---------- produce, then save ----------
+  // Step 1 renders every photo at full size and shows it; step 2 ("一次儲存") saves them all.
+  // The save step needs its own tap: Web Share only opens during a fresh tap, and rendering takes longer than that.
+  function setMadeStatus(msg, kind) { const el = $("madeStatus"); el.textContent = msg; el.className = "status" + (kind ? " " + kind : ""); }
+  function clearMade() {
     const gal = $("gallery");
     gal.querySelectorAll("img").forEach((im) => URL.revokeObjectURL(im.src));
     gal.textContent = "";
-    $("galleryCard").hidden = false;
-    $("shareBtn").hidden = true;
-    const files = [], used = new Set();
-    for (let i = 0; i < list.length; i++) {
-      setSaveStatus(`產生原尺寸圖片… ${i + 1} / ${list.length}`);
-      const blob = await renderFull(list[i]);
-      files.push(new File([blob], fileName(list[i], used), { type: "image/jpeg" }));
-      const im = document.createElement("img");
-      im.alt = list[i].name; im.src = URL.createObjectURL(blob);
-      gal.appendChild(im);
-      await sleep(0);
-    }
-    // Web Share needs a fresh tap, and rendering takes longer than the tap stays valid, so share from a second button.
-    S.shareFiles = files;
-    let canShare = false;
-    try { canShare = !!(navigator.canShare && navigator.canShare({ files })); } catch (e) { canShare = false; }
-    $("shareBtn").hidden = !canShare;
-    $("shareBtn").textContent = files.length > 1 ? `一次存到照片（${files.length} 張）` : "存到照片";
-    $("galleryHint").textContent = canShare
-      ? `圖片已準備好。按上方按鈕，在分享選單選「儲存${files.length > 1 ? " " + files.length + " 張" : ""}影像」就會全部存進照片。也可以長按單張圖片存檔。`
-      : "這個環境不能直接存檔。iPhone 請長按每張圖片 →「加入照片」；電腦請按右鍵 →「另存圖片」，或改用「打包成 ZIP」。";
-    setSaveStatus("");
-    $("galleryCard").scrollIntoView({ behavior: "smooth", block: "start" });
+    S.made = null; S.saveMode = null;
+    $("galleryCard").hidden = true;
+  }
+  function staleMade() {
+    if (!S.made || S.busy) return;
+    clearMade();
+    setSaveStatus("設定改了，請重新產製。", "warn");
   }
 
-  async function saveList(list) {
+  async function produce(list) {
     if (S.busy) return;
     S.busy = true; lockButtons(true);
+    clearMade();
+    const gal = $("gallery");
+    $("galleryCard").hidden = false;
+    $("shareBtn").hidden = true;
+    $("galleryHint").textContent = ""; setMadeStatus("");
     try {
-      const d = await getDL();
-      if (!d) { await showGallery(list); return; }
-      let saved = 0;
-      const used = new Set();
+      const made = [], used = new Set();
       for (let i = 0; i < list.length; i++) {
-        setSaveStatus(list.length > 1 ? `儲存中… 第 ${i + 1} / ${list.length} 張` : "產生中…");
+        setSaveStatus(list.length > 1 ? `產製中… ${i + 1} / ${list.length}` : "產製中…");
         const blob = await renderFull(list[i]);
-        let r;
-        try { r = await saveOne(d, blob, fileName(list[i], used)); }
-        catch (e) { await showGallery(list.slice(i)); setSaveStatus(saved ? `已存 ${saved} 張；其餘請在下方長按存檔。` : "", "warn"); return; }
-        if (r === "declined") {
-          setSaveStatus(saved ? `已存 ${saved} 張，在第 ${i + 1} 張取消後停止。` : "已取消。", "warn");
-          return;
-        }
-        saved++;
+        made.push(new File([blob], fileName(list[i], used), { type: "image/jpeg" }));
+        const im = document.createElement("img");
+        im.alt = list[i].name; im.src = URL.createObjectURL(blob);
+        gal.appendChild(im);
+        await sleep(0);
       }
-      setSaveStatus(list.length > 1 ? `已存 ${saved} 張。` : "已儲存。", "ok");
-      toast(list.length > 1 ? `已存 ${saved} 張` : "已儲存");
+      S.made = made;
+      const n = made.length;
+      const d = await getDL();
+      if (d) S.saveMode = "downloads";
+      else {
+        let ok = false;
+        try { ok = !!(navigator.canShare && navigator.canShare({ files: made })); } catch (e) { ok = false; }
+        S.saveMode = ok ? "share" : null;
+      }
+      $("shareBtn").hidden = !S.saveMode;
+      $("shareBtn").textContent = n > 1 ? `一次儲存（${n} 張）` : "儲存";
+      $("galleryHint").textContent =
+        S.saveMode === "share" ? `按「${n > 1 ? "一次儲存" : "儲存"}」，在分享選單選「儲存${n > 1 ? " " + n + " 張" : ""}影像」就會存進照片。也可以長按單張圖片存檔。`
+        : S.saveMode === "downloads" ? `按「${n > 1 ? "一次儲存" : "儲存"}」後會${n > 1 ? "一張一張" : ""}跳出確認；iPhone 在分享選單選「儲存影像」。`
+        : "這個環境不能直接存檔。iPhone 請長按每張圖片 →「加入照片」；電腦請按右鍵 →「另存圖片」，或改用「打包成 ZIP」。";
+      setSaveStatus(`已產製 ${n} 張，請到下方儲存。`, "ok");
+      $("galleryCard").scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (e) {
-      setSaveStatus("產生圖片失敗，照片可能太大，換一張試試。", "warn");
+      clearMade();
+      setSaveStatus("產製失敗，照片可能太大，換一張試試。", "warn");
     } finally {
       S.busy = false; lockButtons(false); updatePreview();
+    }
+  }
+
+  async function saveMade() {
+    const files = S.made || [];
+    if (!files.length || S.busy) return;
+    const n = files.length;
+    if (S.saveMode === "share") { // call share() right away, while the tap still counts
+      navigator.share({ files }).then(
+        () => setMadeStatus(`已把 ${n} 張送到分享選單。`, "ok"),
+        (e) => {
+          if (e && e.name === "AbortError") return; // viewer closed the sheet
+          setMadeStatus("分享選單打不開，可能一次太多張。請分批產製（例如一次 10 張），或長按單張存檔。", "warn");
+        }
+      );
+      return;
+    }
+    const d = await getDL();
+    if (!d) return;
+    S.busy = true; lockButtons(true);
+    let saved = 0;
+    try {
+      for (let i = 0; i < n; i++) {
+        setMadeStatus(n > 1 ? `儲存中… 第 ${i + 1} / ${n} 張` : "儲存中…");
+        const r = await saveOne(d, files[i], files[i].name);
+        if (r === "declined") { setMadeStatus(saved ? `已存 ${saved} 張，在第 ${i + 1} 張取消後停止。` : "已取消。", "warn"); return; }
+        saved++;
+      }
+      setMadeStatus(n > 1 ? `已存 ${saved} 張。` : "已儲存。", "ok");
+      toast(n > 1 ? `已存 ${saved} 張` : "已儲存");
+    } catch (e) {
+      setMadeStatus((saved ? `已存 ${saved} 張；` : "") + "其餘請長按圖片存檔。", "warn");
+    } finally {
+      S.busy = false; lockButtons(false);
     }
   }
 
@@ -823,24 +861,14 @@ header p { margin: 4px 0 0; color: var(--muted); max-width: 60ch; }
     }
   }
 
-  $("saveAllBtn").addEventListener("click", () => saveList(S.items.length ? S.items.slice() : [SAMPLE]));
-  $("saveBtn").addEventListener("click", () => saveList([curItem()]));
+  $("saveAllBtn").addEventListener("click", () => produce(S.items.length ? S.items.slice() : [SAMPLE]));
+  $("saveBtn").addEventListener("click", () => produce([curItem()]));
   $("zipBtn").addEventListener("click", saveZip);
-  $("shareBtn").addEventListener("click", () => {
-    const files = S.shareFiles || [];
-    if (!files.length) return;
-    navigator.share({ files }).then(
-      () => setSaveStatus(`已把 ${files.length} 張送到分享選單。`, "ok"),
-      (e) => {
-        if (e && e.name === "AbortError") return; // viewer closed the sheet
-        setSaveStatus("分享選單打不開，可能一次太多張。請分批處理（例如一次 10 張），或長按單張存檔。", "warn");
-      }
-    );
-  });
+  $("shareBtn").addEventListener("click", saveMade);
 
   // ---------- wiring ----------
   $("file").addEventListener("change", (e) => { loadFiles(e.target.files); e.target.value = ""; });
-  document.querySelectorAll('input[name="style"]').forEach((r) => r.addEventListener("change", () => { S.style = r.value; schedule(); }));
+  document.querySelectorAll('input[name="style"]').forEach((r) => r.addEventListener("change", () => { S.style = r.value; staleMade(); schedule(); }));
   for (const k of FIELDS) $("f-" + k).addEventListener("input", (e) => {
     const item = curItem();
     item.v[k] = e.target.value;
@@ -849,17 +877,19 @@ header p { margin: 4px 0 0; color: var(--muted); max-width: 60ch; }
       const dot = document.querySelectorAll(".thumb .dot")[S.cur];
       if (dot) dot.className = "dot" + (item.found >= 4 ? "" : " warn");
     }
+    staleMade();
     schedule();
   });
-  $("t-date").addEventListener("change", schedule);
-  $("t-lens").addEventListener("change", schedule);
-  $("t-exif").addEventListener("change", () => { $("t-gps").disabled = !$("t-exif").checked; });
+  $("t-date").addEventListener("change", () => { staleMade(); schedule(); });
+  $("t-lens").addEventListener("change", () => { staleMade(); schedule(); });
+  $("t-gps").addEventListener("change", staleMade);
+  $("t-exif").addEventListener("change", () => { staleMade(); $("t-gps").disabled = !$("t-exif").checked; });
   $("prevBtn").addEventListener("click", () => select(S.cur - 1));
   $("nextBtn").addEventListener("click", () => select(S.cur + 1));
   $("applyAll").addEventListener("click", () => {
     const m = $("f-model").value;
     S.items.forEach((it) => { it.v.model = m; const f = foundOf(it.v); it.found = f.length; it.foundNames = f.map((x) => NAMES[x]).join("、"); });
-    renderStrip(); toast(`已把機型「${m}」套用到 ${S.items.length} 張`);
+    staleMade(); renderStrip(); toast(`已把機型「${m}」套用到 ${S.items.length} 張`);
   });
   document.addEventListener("keydown", (e) => {
     if (e.target.tagName === "INPUT" || S.items.length < 2) return;
